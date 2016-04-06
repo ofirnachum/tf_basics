@@ -37,14 +37,14 @@ class RNN(object):
             return (t + 1, h_t)
 
         time = tf.constant(0, dtype=tf.int32, name="time")
-        state = self.h0
-        _, final_hidden_state = control_flow_ops.While(
+        state = tf.reshape(self.h0, [self.hidden_dim, 1])
+        _, self.final_hidden_state = control_flow_ops.While(
             cond=lambda t, _: t < num_indices,
             body=_recurrence,
             loop_vars=(time, state))
 
         self.pred_y = self.activation(
-            tf.matmul(self.W_out, tf.reshape(final_hidden_state, [self.hidden_dim, 1]))
+            tf.matmul(self.W_out, tf.reshape(self.final_hidden_state, [self.hidden_dim, 1]))
             + self.b_out)
         self.loss = self.loss_fn(self.y, self.pred_y)
 
@@ -65,7 +65,7 @@ class RNN(object):
         return tf.zeros(shape)
 
     def create_recurrent_unit(self):
-        self.W_rec = tf.Variable(self.init_matrix([self.output_dim, self.emb_dim]))
+        self.W_rec = tf.Variable(self.init_matrix([self.hidden_dim, self.emb_dim]))
         def unit(h_tm1, inp):
             return h_tm1 + tf.matmul(self.W_rec, inp)
         return unit
@@ -75,3 +75,40 @@ class RNN(object):
 
     def loss_fn(self, y, pred_y):
         return tf.reduce_sum(tf.square(y - pred_y))
+
+
+class SimpleRNN(RNN):
+
+    def create_recurrent_unit(self):
+        self.W_hh = tf.Variable(self.init_matrix([self.hidden_dim, self.hidden_dim]))
+        self.W_hi = tf.Variable(self.init_matrix([self.hidden_dim, self.emb_dim]))
+        self.b_h = tf.Variable(self.init_vector([self.hidden_dim, 1]))
+        def unit(h_tm1, inp):
+            return self.inner_activation(
+                tf.matmul(self.W_hh, h_tm1) +
+                tf.matmul(self.W_hi, inp) +
+                self.b_h)
+        return unit
+
+    def inner_activation(self, inp):
+        return tf.tanh(inp)
+
+
+class GRU(RNN):
+
+    def create_recurrent_unit(self):
+        self.W_ri = tf.Variable(self.init_matrix([self.hidden_dim, self.emb_dim]))
+        self.W_zi = tf.Variable(self.init_matrix([self.hidden_dim, self.emb_dim]))
+        self.W_hi = tf.Variable(self.init_matrix([self.hidden_dim, self.emb_dim]))
+        self.U_rh = tf.Variable(self.init_matrix([self.hidden_dim, self.hidden_dim]))
+        self.U_zh = tf.Variable(self.init_matrix([self.hidden_dim, self.hidden_dim]))
+        self.U_hh = tf.Variable(self.init_matrix([self.hidden_dim, self.hidden_dim]))
+
+        def unit(h_tm1, inp):
+            r = tf.sigmoid(tf.matmul(self.W_ri, inp) + tf.matmul(self.U_rh, h_tm1))
+            z = tf.sigmoid(tf.matmul(self.W_zi, inp) + tf.matmul(self.U_zh, h_tm1))
+            h_tilda = tf.tanh(tf.matmul(self.W_hi, inp) + tf.matmul(self.U_hh, r * h_tm1))
+            h_t = (1 - z) * h_tm1 + z * h_tilda
+            return h_t
+
+        return unit
